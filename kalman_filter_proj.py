@@ -39,7 +39,9 @@ def pos(t):
     a = accel(t)
     return x0 + (v0 + a/omega)*t - a/(omega**2)*np.sin(omega*t)
 
-# IMU Model:
+# IMU Model: (v_c0 = v0_bar, x_c0 = x0_bar)
+v_c0 = v0_bar
+x_c0 = x0_bar
 def a_c(t):
     w = np.sqrt(V)*np.random.randn()  # imu meas. noise
     return accel(t) + ba + w
