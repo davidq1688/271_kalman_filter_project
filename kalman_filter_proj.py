@@ -8,21 +8,19 @@ omega = 0.2  # angular frequency for the true acceleration profile
 imu_fs = 200  # IMU sample rate (Hz)
 dt_imu = 1/imu_fs
 W = 0.0004  # IMU meas. noise variance (m/s/s)**2
+def generate_imu_noise_w():
+    w = np.sqrt(W)*np.random.randn()  # imu process noise
+    return w  # scalar w
 
-# bias apriori statistics
+# initial bias statistics
 ba_bar = 0
 ba_var = 0.01  # (m/s/s)**2
-# ba = ba_bar + np.sqrt(ba_var)*np.random.randn()
-
-# initial vel apriori statistics
+# initial vel statistics
 v0_bar = 100  # (m/s)
 v0_var = 1  # (m/s)**2
-# v0 = v0_bar + np.sqrt(v0_var)*np.random.randn()
-
-# initial pos apriori statistics
+# initial pos statistics
 p0_bar = 0
 p0_var = 10
-# p0 = p0_bar + np.sqrt(p0_var)*np.random.randn()
 
 # GPS
 V_eta_p = 1  # variance of x meas. noise (m)**2
@@ -31,6 +29,44 @@ V_gps = np.array([[V_eta_p, 0],
                   [0, V_eta_v]])
 gps_fs = 5
 gps_meas_interval = int(imu_fs/gps_fs)
+
+def generate_gps_noise_eta():
+    eta_p = np.sqrt(V_eta_p)*np.random.randn()
+    eta_v = np.sqrt(V_eta_v)*np.random.randn()
+    return np.array([eta_p, eta_v]).reshape((-1,1))  # col vector [eta_p, eta_v]
+
+def gps_meas_update(current_state_true, eta):
+    current_state_true = current_state_true.reshape((-1,1))
+    eta = eta.reshape((-1,1))
+    z = current_state_true[0:2].reshape((-1,1)) + eta
+    return z  # col vector [z_p, z_v]
+
+# Truth Model:
+# def true_state_continuous(t, delta_x0):
+#     t = np.array(t).reshape((-1,))
+#     delta_x0 = delta_x0.reshape((-1,))
+#     p0 = delta_x0[0] + p0_bar
+#     v0 = delta_x0[1] + v0_bar
+#     ba0 = delta_x0[2]
+
+#     a = 10*np.sin(omega*t)
+#     v = v0 + a/omega - a/omega*np.cos(omega*t)
+#     p = p0 + (v0 + a/omega)*t - a/(omega**2)*np.sin(omega*t)
+#     ba_list = ba0 * np.ones(np.shape(p))
+#     return np.array([[p], [v], [ba_list]])
+
+# Discrete Linear System: state x = [delta_p_e, delta_v_e, ba], noise w = [w]
+# x_k+1 = PHI*x_k + GAMMA*w
+# delta_p_e = p_e - p_c, delta_v_e = v_e - v_c
+PHI = np.array([[1, dt_imu, -dt_imu**2/2],
+                [0, 1, -dt_imu],
+                [0, 0, 1]])  # System State Matrix
+GAMMA = np.array([[-dt_imu**2/2],
+                  [-dt_imu],
+                  [0]])  # System noise Matrix
+# [delta_z_p, delta_z_v].T = [delta_p, delta_v].T + [eta_p, eta_v].T
+H = np.array([[1, 0, 0],
+              [0, 1, 0]])
 
 # Initialize true initial states and the filter initial states
 def initialize():
@@ -49,78 +85,6 @@ def initialize():
                    [0, 0, ba_var]])
     return delta_x0_true, delta_x0, P0
 
-# Truth Model:
-def accel(t):
-    return np.array(10*np.sin(omega*t)).reshape((-1,))
-
-def vel(t, v0):
-    a = accel(t)
-    return v0 + a/omega - a/omega*np.cos(omega*t)
-
-def pos(t, v0, p0):
-    a = accel(t)
-    return p0 + (v0 + a/omega)*t - a/(omega**2)*np.sin(omega*t)
-
-def true_state_continuous(t, delta_x0):
-    t = np.array(t).reshape((-1,))
-    delta_x0 = delta_x0.reshape((-1,))
-    p0 = delta_x0[0] + p0_bar
-    v0 = delta_x0[1] + v0_bar
-    ba0 = delta_x0[2]
-    v = vel(t, v0)
-    p = pos(t, v0, p0)
-    ba_list = ba0 * np.ones(np.shape(p))
-    return np.array([[p], [v], [ba_list]]).reshape((-1,1))
-
-# IMU Model: (v_c0 = v0_bar, x_c0 = x0_bar)
-v_c0 = v0_bar
-p_c0 = p0_bar
-def generate_imu_noise_w():
-    w = np.sqrt(W)*np.random.randn()  # imu process noise
-    return w
-
-def a_c(current_a, ba, w):
-    return current_a + ba + w
-
-def v_c_step(a_current, v_c_current):
-    return v_c_current + a_current*dt_imu
-
-def p_c_step(a_current, v_c_current, p_c_current):
-    return p_c_current + v_c_current*dt_imu + a_current*dt_imu**2/2
-
-# Dynamic Model: (x_e0 = x0, v_e0 = v0)
-def v_e(ve_current, a_current):
-    return ve_current + a_current*dt_imu
-
-def p_e(pe_current, ve_current, a_current):
-    return pe_current + ve_current*dt_imu + a_current*dt_imu**2/2
-
-# Discrete Linear System: state x = [delta_p_e, delta_v_e, ba], noise w = [w]
-# x_k+1 = PHI*x_k + GAMMA*w
-# delta_p_e = p_e - p_c, delta_v_e = v_e - v_c
-PHI = np.array([[1, dt_imu, -dt_imu**2/2],
-                [0, 1, -dt_imu],
-                [0, 0, 1]])  # System State Matrix
-GAMMA = np.array([[-dt_imu**2/2],
-                  [-dt_imu],
-                  [0]])  # System noise Matrix
-
-# GPS Measurement Update
-def generate_gps_noise_eta():
-    eta_p = V_eta_p*np.random.randn()
-    eta_v = V_eta_v*np.random.randn()
-    return np.array([eta_p, eta_v]).reshape((-1,1))
-
-def gps_meas_update(current_state_true, eta):
-    current_state_true = current_state_true.reshape((-1,1))
-    eta = eta.reshape((-1,1))
-    z = current_state_true[0:2] + eta
-    return z  # col vector [z_p, z_v]
-
-# [delta_z_p, delta_z_v].T = [delta_p, delta_v].T + [eta_p, eta_v].T
-H = np.array([[1, 0, 0],
-              [0, 1, 0]])
-
 def simulate_one_realization(time_list, gps_interval=40):
     # initialize system true state, estimate state, and state covariance
     delta_x0_true, delta_x0_est, P0 = initialize()
@@ -129,10 +93,12 @@ def simulate_one_realization(time_list, gps_interval=40):
     delta_x_true_list = []
     delta_x_est_list = []
     P_list = []
+    x_true_list = []
 
     delta_x_true_list.append(delta_x0_true)
     delta_x_est_list.append(delta_x0_est)
     P_list.append(P0)
+    x_true_list.append(delta_x0_true + np.array([[p0_bar],[v0_bar],[0]]))
 
     for k in range(len(time_list)-1):
         # imu noise
@@ -169,16 +135,47 @@ N_realization = 1000
 delta_x_true_list, delta_x_est_list, P_list = simulate_one_realization(t_list)
 
 # visualization
-delta_x_true_list = np.array(delta_x_true_list).reshape((3, -1))
-delta_x_est_list = np.array(delta_x_est_list).reshape((3, -1))
+delta_x_true_list = np.array(delta_x_true_list).reshape((-1, 3))
+delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
+sigma_p_list = []
+sigma_v_list = []
+sigma_ba_list = []
+for i in range(len(t_list)):
+    P_i = P_list[i]
+    sigma_p_list.append(np.sqrt(P_i[0,0]))
+    sigma_v_list.append(np.sqrt(P_i[1,1]))
+    sigma_ba_list.append(np.sqrt(P_i[2,2]))
 
-plt.figure(figsize=(12, 6))
-plt.plot(t_list, delta_x_true_list[0, :], label='True Position', linestyle='dashed')
+plt.figure()
+# plt.plot(t_list, delta_x_true_list[:, 0], label='True Position', linestyle='dashed')
 # plt.plot([m for m in measurements if m is not None], 'o', label='Measurements (Sparse)')
-plt.plot(delta_x_est_list[0, :], label='Estimated Position', linewidth=2)
-plt.xlabel('Time Step')
-plt.ylabel('Position')
+# plt.plot(t_list, delta_x_est_list[:, 0], label='Estimated Position', linewidth=2)
+plt.plot(t_list, delta_x_true_list[:, 0]-delta_x_est_list[:, 0], label='pos estimation error')
+plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
+plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
+plt.xlabel('Time Step (s)')
+plt.ylabel('Position (m)')
 plt.legend()
-plt.title('Kalman Filter with Sparse Measurements')
+plt.title('Position Estimation Error')
+plt.grid()
+
+plt.figure()
+plt.plot(t_list, delta_x_true_list[:, 1]-delta_x_est_list[:, 1], label='vel estimation error')
+plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
+plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
+plt.xlabel('Time Step (s)')
+plt.ylabel('Velocity (m/s)')
+plt.legend()
+plt.title('Velocity Estimation Error')
+plt.grid()
+
+plt.figure()
+plt.plot(t_list, delta_x_true_list[:, 2]-delta_x_est_list[:, 2], label='bias estimation error')
+plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
+plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
+plt.xlabel('Time Step (s)')
+plt.ylabel('bias (m/s/s)')
+plt.legend()
+plt.title('IMU bias Estimation Error')
 plt.grid()
 plt.show()
