@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # Statistics and Parameters:
 omega = 0.2  # angular frequency for the true acceleration profile
@@ -75,16 +76,22 @@ def initialize():
     delta_p0_true = np.sqrt(p0_var)*np.random.randn()
     delta_x0_true = np.array([delta_p0_true, delta_v0_true, ba_true]).reshape((-1,1))
 
-    ba0 = ba_bar + np.sqrt(ba_var)*np.random.randn()
-    delta_v0 = np.sqrt(v0_var)*np.random.randn()
-    delta_p0 = np.sqrt(p0_var)*np.random.randn()
-    delta_x0 = np.array([delta_p0, delta_v0, ba0]).reshape((-1,1))
+    # ba0 = ba_bar + np.sqrt(ba_var)*np.random.randn()
+    # delta_v0 = np.sqrt(v0_var)*np.random.randn()
+    # delta_p0 = np.sqrt(p0_var)*np.random.randn()
+    delta_x0 = np.array([0, 0, 0]).reshape((-1,1))
 
     P0 = np.array([[p0_var, 0,0],
                    [0, v0_var, 0],
                    [0, 0, ba_var]])
     return delta_x0_true, delta_x0, P0
 
+
+# Simulate one realization, initialize with random true state and random estimated state
+# Output: delta_x_true_list (Nx3 ndarray)
+# Output: delta_x_est_list (Nx3 ndarray)
+# Output: P_list (list of N 3x3 P matrix)
+# Output: state_error_list (Nx3 ndarray)
 def simulate_one_realization(time_list, gps_interval=40):
     # initialize system true state, estimate state, and state covariance
     delta_x0_true, delta_x0_est, P0 = initialize()
@@ -127,55 +134,192 @@ def simulate_one_realization(time_list, gps_interval=40):
         P_list.append(P)
         delta_x_est_list.append(delta_x_est)
 
-    return delta_x_true_list, delta_x_est_list, P_list
+    delta_x_true_list = np.array(delta_x_true_list).reshape((-1, 3))
+    delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
+    state_error_list = delta_x_true_list - delta_x_est_list
+    return delta_x_true_list, delta_x_est_list, P_list, state_error_list
 
+# visualization functions
+def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list):
+    sigma_p_list = []
+    sigma_v_list = []
+    sigma_ba_list = []
+    for i in range(len(t_list)):
+        P_i = P_list[i]
+        sigma_p_list.append(np.sqrt(P_i[0,0]))
+        sigma_v_list.append(np.sqrt(P_i[1,1]))
+        sigma_ba_list.append(np.sqrt(P_i[2,2]))
+
+    plt.figure()
+    plt.subplot(131)
+    plt.plot(t_list, delta_x_true_list[:, 0]-delta_x_est_list[:, 0], label='pos estimation error')
+    plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
+    plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Position (m)')
+    plt.ylim([-1, 1])
+    plt.legend()
+    plt.title('Position Estimation Error')
+    plt.grid()
+
+    plt.subplot(132)
+    plt.plot(t_list, delta_x_true_list[:, 1]-delta_x_est_list[:, 1], label='vel estimation error')
+    plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
+    plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Velocity (m/s)')
+    plt.ylim([-0.1, 0.1])
+    plt.legend()
+    plt.title('Velocity Estimation Error')
+    plt.grid()
+
+    plt.subplot(133)
+    plt.plot(t_list, delta_x_true_list[:, 2]-delta_x_est_list[:, 2], label='bias estimation error')
+    plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
+    plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.ylabel('bias (m/s/s)')
+    plt.ylim([-0.05, 0.05])
+    plt.legend()
+    plt.title('IMU bias Estimation Error')
+    plt.grid()
+    # plt.show()
+    plot_P_error_one_realization(t_list, P_avg_list, P_list)
+
+def plot_P_error_one_realization(t_list, P_avg_list, P_list):
+    P_error_list = []
+    for i in range(len(t_list)):
+        P_error_list.append(P_avg_list[i] - P_list[i])
+    P11_error = [P[0,0] for P in P_error_list]  # shape: 1D len(t_list)
+    P12_error = [P[0,1] for P in P_error_list]
+    P13_error = [P[0,2] for P in P_error_list]
+    P21_error = [P[1,0] for P in P_error_list]
+    P22_error = [P[1,1] for P in P_error_list]
+    P23_error = [P[1,2] for P in P_error_list]
+    P31_error = [P[2,0] for P in P_error_list]
+    P32_error = [P[2,1] for P in P_error_list]
+    P33_error = [P[2,2] for P in P_error_list]
+    plt.figure()
+    plt.subplot(331)  # P11 error
+    plt.plot(t_list, P11_error)
+    plt.title('P_11')
+    plt.grid()
+    plt.subplot(332)
+    plt.plot(t_list, P12_error)
+    plt.title('P_12')
+    plt.grid()
+    plt.subplot(333)
+    plt.plot(t_list, P13_error)
+    plt.title('P_13')
+    plt.grid()
+    plt.subplot(334)
+    plt.plot(t_list, P21_error)
+    plt.title('P_21')
+    plt.grid()
+    plt.subplot(335)
+    plt.plot(t_list, P22_error)
+    plt.title('P_22')
+    plt.grid()
+    plt.subplot(336)
+    plt.plot(t_list, P23_error)
+    plt.title('P_23')
+    plt.grid()
+    plt.subplot(337)
+    plt.plot(t_list, P31_error)
+    plt.title('P_31')
+    plt.grid()
+    plt.subplot(338)
+    plt.plot(t_list, P32_error)
+    plt.title('P_32')
+    plt.grid()
+    plt.subplot(339)
+    plt.plot(t_list, P33_error)
+    plt.title('P_33')
+    plt.grid()
+    # plt.show()
+
+def plot_avg_estimation_error(t_list, error_avg_list):
+    sigma_p_list = []
+    sigma_v_list = []
+    sigma_ba_list = []
+    for i in range(len(t_list)):
+        P_i = P_avg_list[i]
+        sigma_p_list.append(np.sqrt(P_i[0,0]))
+        sigma_v_list.append(np.sqrt(P_i[1,1]))
+        sigma_ba_list.append(np.sqrt(P_i[2,2]))
+    plt.figure()
+    plt.plot(t_list, error_avg_list[0, :], label='Avg pos est error')
+    # plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
+    # plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.title('Average Position Error')
+    plt.grid()
+
+    plt.figure()
+    plt.plot(t_list, error_avg_list[1, :], label='avg vel est error')
+    # plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
+    # plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.title('Average Velocity Error')
+    plt.grid()
+
+    plt.figure()
+    plt.plot(t_list, error_avg_list[2, :], label='avg bias est error')
+    # plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
+    # plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
+    plt.xlabel('Time (s)')
+    plt.title('Average Bias Error')
+    plt.grid()
+
+# Begin Simulation #################################################################################################
 t_list = np.arange(0, 30+dt_imu, dt_imu)
 N_realization = 1000
 
-delta_x_true_list, delta_x_est_list, P_list = simulate_one_realization(t_list)
+# Test one realization and visualize KF performance
+delta_x_true_list, delta_x_est_list, P_list, error_l = simulate_one_realization(t_list)
+# plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list)
 
-# visualization
-delta_x_true_list = np.array(delta_x_true_list).reshape((-1, 3))
-delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
-sigma_p_list = []
-sigma_v_list = []
-sigma_ba_list = []
-for i in range(len(t_list)):
-    P_i = P_list[i]
-    sigma_p_list.append(np.sqrt(P_i[0,0]))
-    sigma_v_list.append(np.sqrt(P_i[1,1]))
-    sigma_ba_list.append(np.sqrt(P_i[2,2]))
+# Ensamble of Realizations
+P_list_all_realization = []  # N_realization x len(t_list) x np.array(3 x 3)
+e_l_all_realization = []  # shape: N_realization x np.array(len(t_list) x 3)
+error_p_all_realization = []  # shape: N_realization x len(t_list)
+error_v_all_realization = []
+error_b_all_realization = []
 
-plt.figure()
-# plt.plot(t_list, delta_x_true_list[:, 0], label='True Position', linestyle='dashed')
-# plt.plot([m for m in measurements if m is not None], 'o', label='Measurements (Sparse)')
-# plt.plot(t_list, delta_x_est_list[:, 0], label='Estimated Position', linewidth=2)
-plt.plot(t_list, delta_x_true_list[:, 0]-delta_x_est_list[:, 0], label='pos estimation error')
-plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
-plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
-plt.xlabel('Time Step (s)')
-plt.ylabel('Position (m)')
-plt.legend()
-plt.title('Position Estimation Error')
-plt.grid()
+for i in tqdm(range(N_realization), desc='Simulating Realizations'):
+    # simulate one realization
+    delta_x_true_list, delta_x_est_list, P_list, error_l = simulate_one_realization(t_list)
 
-plt.figure()
-plt.plot(t_list, delta_x_true_list[:, 1]-delta_x_est_list[:, 1], label='vel estimation error')
-plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
-plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
-plt.xlabel('Time Step (s)')
-plt.ylabel('Velocity (m/s)')
-plt.legend()
-plt.title('Velocity Estimation Error')
-plt.grid()
+    # save results
+    error_p = np.array(error_l[:, 0]).reshape((-1,))
+    error_v = np.array(error_l[:, 1]).reshape((-1,))
+    error_b = np.array(error_l[:, 2]).reshape((-1,))
 
-plt.figure()
-plt.plot(t_list, delta_x_true_list[:, 2]-delta_x_est_list[:, 2], label='bias estimation error')
-plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
-plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
-plt.xlabel('Time Step (s)')
-plt.ylabel('bias (m/s/s)')
-plt.legend()
-plt.title('IMU bias Estimation Error')
-plt.grid()
+    error_p_all_realization.append(error_p)
+    error_v_all_realization.append(error_v)
+    error_b_all_realization.append(error_b)
+
+    P_list_all_realization.append(P_list)
+    e_l_all_realization.append(error_l)
+
+error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
+error_v_avg = np.mean(error_v_all_realization, axis=0)  # avg of vel_error[time]
+error_b_avg = np.mean(error_b_all_realization, axis=0)  # avg of bias_error[time]
+e_avg_list = np.array([error_p_avg, error_v_avg, error_b_avg])  # shape: 3xlen(t_list)
+
+# Compute P_ave
+P_avg_list = []
+for i in tqdm(range(len(t_list)), desc='Computing P_avg[time]'):
+    error_l_t = [e_l[i, :].reshape((-1,)) for e_l in e_l_all_realization]
+    error_l_t = np.array(error_l_t).T  # shape: 3xN_realization
+    temp = error_l_t - e_avg_list[:, i].reshape((-1, 1))  # shape: 3xN_realization
+    P_t_list = []
+    for j in range(N_realization):
+        P_t_list.append(np.outer(temp[:, j], temp[:, j]))
+    P_avg_list.append(np.mean(P_t_list, axis=0))
+
+# Plotting Results
+plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list)
+plot_avg_estimation_error(t_list, e_avg_list)
+
 plt.show()
