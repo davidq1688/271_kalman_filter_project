@@ -91,7 +91,7 @@ def initialize():
 # Output: delta_x_true_list (Nx3 ndarray)
 # Output: delta_x_est_list (Nx3 ndarray)
 # Output: P_list (list of N 3x3 P matrix)
-# Output: state_error_list (Nx3 ndarray)
+# Output: state_error_list (Nx3 ndarray): delta_x_true_list - delta_x_est_list
 def simulate_one_realization(time_list, gps_interval=40):
     # initialize system true state, estimate state, and state covariance
     delta_x0_true, delta_x0_est, P0 = initialize()
@@ -271,20 +271,28 @@ def plot_avg_estimation_error(t_list, error_avg_list):
     plt.title('Average Bias Error')
     plt.grid()
 
+def plot_orthogonality_for_state_est_and_est_error(t_list, ortho_list):
+    plt.figure()
+    plt.plot(t_list, ortho_list)
+    plt.xlabel('Time (s)')
+    plt.title('Check Orthogonality for State Estimate and Estimation Error')
+    plt.grid()
+
 # Begin Simulation #################################################################################################
 t_list = np.arange(0, 30+dt_imu, dt_imu)
-N_realization = 1000
+N_realization = 100
 
 # Test one realization and visualize KF performance
 delta_x_true_list, delta_x_est_list, P_list, error_l = simulate_one_realization(t_list)
 # plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list)
 
 # Ensamble of Realizations
-P_list_all_realization = []  # N_realization x len(t_list) x np.array(3 x 3)
-e_l_all_realization = []  # shape: N_realization x np.array(len(t_list) x 3)
-error_p_all_realization = []  # shape: N_realization x len(t_list)
+P_list_all_realization = []  # N_realization x N_time x np.array(3 x 3)
+e_l_all_realization = []  # shape: N_realization x np.array(N_time x 3)
+error_p_all_realization = []  # shape: N_realization x N_time
 error_v_all_realization = []
 error_b_all_realization = []
+delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
 
 for i in tqdm(range(N_realization), desc='Simulating Realizations'):
     # simulate one realization
@@ -301,6 +309,7 @@ for i in tqdm(range(N_realization), desc='Simulating Realizations'):
 
     P_list_all_realization.append(P_list)
     e_l_all_realization.append(error_l)
+    delta_x_est_all_realization.append(delta_x_est_list)
 
 error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
 error_v_avg = np.mean(error_v_all_realization, axis=0)  # avg of vel_error[time]
@@ -308,18 +317,25 @@ error_b_avg = np.mean(error_b_all_realization, axis=0)  # avg of bias_error[time
 e_avg_list = np.array([error_p_avg, error_v_avg, error_b_avg])  # shape: 3xlen(t_list)
 
 # Compute P_ave
-P_avg_list = []
-for i in tqdm(range(len(t_list)), desc='Computing P_avg[time]'):
+P_avg_list = []  # N_time x np.array(3x3)
+ortho_e_and_e_est_list = []  # [N_time] list
+for i in tqdm(range(len(t_list)), desc='Computing P_avg and Check Orthogonality'):
     error_l_t = [e_l[i, :].reshape((-1,)) for e_l in e_l_all_realization]
     error_l_t = np.array(error_l_t).T  # shape: 3xN_realization
-    temp = error_l_t - e_avg_list[:, i].reshape((-1, 1))  # shape: 3xN_realization
+    temp = error_l_t - e_avg_list[:, i].reshape((-1, 1))  # e_l(ti) - e_avg(ti) shape: 3xN_realization
+    delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
+    delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
     P_t_list = []
+    ortho_t_list = []
     for j in range(N_realization):
         P_t_list.append(np.outer(temp[:, j], temp[:, j]))
+        ortho_t_list.append(np.inner(temp[:, j], delta_x_est_t[:, j]))  # TODO: check inner or outer product
     P_avg_list.append(np.mean(P_t_list, axis=0))
+    ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
 
 # Plotting Results
 plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list)
 plot_avg_estimation_error(t_list, e_avg_list)
+plot_orthogonality_for_state_est_and_est_error(t_list, ortho_e_and_e_est_list)
 
 plt.show()
