@@ -29,6 +29,7 @@ V_eta_v = (4/100)**2  # variance of v meas. noise (m/s)**2
 V_gps = np.array([[V_eta_p, 0],
                   [0, V_eta_v]])
 gps_fs = 5
+dt_gps = 1/gps_fs
 gps_meas_interval = int(imu_fs/gps_fs)
 
 def generate_gps_noise_eta():
@@ -88,10 +89,11 @@ def initialize():
 
 
 # Simulate one realization, initialize with random true state and random estimated state
-# Output: delta_x_true_list (Nx3 ndarray)
-# Output: delta_x_est_list (Nx3 ndarray)
-# Output: P_list (list of N 3x3 P matrix)
-# Output: state_error_list (Nx3 ndarray): delta_x_true_list - delta_x_est_list
+# Output: delta_x_true_list (N_time x 3 ndarray)
+# Output: delta_x_est_list (N_time x 3 ndarray)
+# Output: P_list (list of N_time 3x3 P matrix)
+# Output: state_error_list (N_time x 3 ndarray): delta_x_true_list - delta_x_est_list
+# Output: residual_list (N_time_gps x 2 ndarray): delta_z - H@delta_x_pred
 def simulate_one_realization(time_list, gps_interval=40):
     # initialize system true state, estimate state, and state covariance
     delta_x0_true, delta_x0_est, P0 = initialize()
@@ -101,6 +103,7 @@ def simulate_one_realization(time_list, gps_interval=40):
     delta_x_est_list = []
     P_list = []
     x_true_list = []
+    residual_list = []  # residual = delta_z - H@delta_x_pred
 
     delta_x_true_list.append(delta_x0_true)
     delta_x_est_list.append(delta_x0_est)
@@ -125,7 +128,9 @@ def simulate_one_realization(time_list, gps_interval=40):
             delta_z = gps_meas_update(delta_x_true, eta)
             # KF meas update: x_est = x_pred + K*(z - H*x_pred), K = P*H.T*inv(V)
             P = M - M@H.T@np.linalg.inv(H@M@H.T + V_gps)@H@M
-            delta_x_est = delta_x_pred + P@H.T@np.linalg.inv(V_gps)@(delta_z - H@delta_x_pred)
+            r = delta_z - H@delta_x_pred
+            delta_x_est = delta_x_pred + P@H.T@np.linalg.inv(V_gps)@r
+            residual_list.append(r)
         else:
             # no measurement obtained
             P = M
@@ -137,7 +142,8 @@ def simulate_one_realization(time_list, gps_interval=40):
     delta_x_true_list = np.array(delta_x_true_list).reshape((-1, 3))
     delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
     state_error_list = delta_x_true_list - delta_x_est_list
-    return delta_x_true_list, delta_x_est_list, P_list, state_error_list
+    residual_list = np.array(residual_list).reshape((-1, 2))
+    return delta_x_true_list, delta_x_est_list, P_list, state_error_list, residual_list
 
 # visualization functions
 def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list):
@@ -278,12 +284,29 @@ def plot_orthogonality_for_state_est_and_est_error(t_list, ortho_list):
     plt.title('Check Orthogonality for State Estimate and Estimation Error')
     plt.grid()
 
+def print_residual_correlation(t_gps_list, r_l_all_realization):
+    random_time_idx = np.random.choice(range(len(t_gps_list)), size=2, replace=False)
+    t_i_idx = random_time_idx[0]
+    t_j_idx = random_time_idx[1]
+
+    r_l_ti = [r_l[t_i_idx, :].reshape((-1,)) for r_l in r_l_all_realization]
+    r_l_tj = [r_l[t_j_idx, :].reshape((-1,)) for r_l in r_l_all_realization]
+    r_l_ti = np.array(r_l_ti).T  # shape: 2xN_realization
+    r_l_tj = np.array(r_l_tj).T  # shape: 2xN_realization
+    r_l_corr_list = []
+    for j in range(N_realization):
+        r_l_corr_list.append(np.inner(r_l_ti[:, j], r_l_tj[:, j]))
+    r_l_corr = np.mean(r_l_corr_list)
+
+    print('Residual Correlation: ', r_l_corr)
+
 # Begin Simulation #################################################################################################
 t_list = np.arange(0, 30+dt_imu, dt_imu)
+t_gps_list = np.arange(0, 30+dt_gps, dt_gps)
 N_realization = 100
 
 # Test one realization and visualize KF performance
-delta_x_true_list, delta_x_est_list, P_list, error_l = simulate_one_realization(t_list)
+delta_x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
 # plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list)
 
 # Ensamble of Realizations
@@ -293,10 +316,11 @@ error_p_all_realization = []  # shape: N_realization x N_time
 error_v_all_realization = []
 error_b_all_realization = []
 delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
+residual_all_realization = []  # shape: N_realization x np.array(N_time_gps x 2)
 
 for i in tqdm(range(N_realization), desc='Simulating Realizations'):
     # simulate one realization
-    delta_x_true_list, delta_x_est_list, P_list, error_l = simulate_one_realization(t_list)
+    delta_x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
 
     # save results
     error_p = np.array(error_l[:, 0]).reshape((-1,))
@@ -310,13 +334,14 @@ for i in tqdm(range(N_realization), desc='Simulating Realizations'):
     P_list_all_realization.append(P_list)
     e_l_all_realization.append(error_l)
     delta_x_est_all_realization.append(delta_x_est_list)
+    residual_all_realization.append(r_l)
 
 error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
 error_v_avg = np.mean(error_v_all_realization, axis=0)  # avg of vel_error[time]
 error_b_avg = np.mean(error_b_all_realization, axis=0)  # avg of bias_error[time]
 e_avg_list = np.array([error_p_avg, error_v_avg, error_b_avg])  # shape: 3xlen(t_list)
 
-# Compute P_ave
+# Compute P_ave, check for x_est and e_est orthogonality
 P_avg_list = []  # N_time x np.array(3x3)
 ortho_e_and_e_est_list = []  # [N_time] list
 for i in tqdm(range(len(t_list)), desc='Computing P_avg and Check Orthogonality'):
@@ -329,7 +354,7 @@ for i in tqdm(range(len(t_list)), desc='Computing P_avg and Check Orthogonality'
     ortho_t_list = []
     for j in range(N_realization):
         P_t_list.append(np.outer(temp[:, j], temp[:, j]))
-        ortho_t_list.append(np.inner(temp[:, j], delta_x_est_t[:, j]))  # TODO: check inner or outer product
+        ortho_t_list.append(np.inner(temp[:, j], delta_x_est_t[:, j]))
     P_avg_list.append(np.mean(P_t_list, axis=0))
     ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
 
@@ -337,5 +362,6 @@ for i in tqdm(range(len(t_list)), desc='Computing P_avg and Check Orthogonality'
 plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list)
 plot_avg_estimation_error(t_list, e_avg_list)
 plot_orthogonality_for_state_est_and_est_error(t_list, ortho_e_and_e_est_list)
+print_residual_correlation(t_gps_list, residual_all_realization)
 
 plt.show()
