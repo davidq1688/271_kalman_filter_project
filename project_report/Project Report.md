@@ -263,7 +263,7 @@ $$
 :--:|
 *Average Residual Correlation for 1000 Realization* |
 
-The above result is calculated from randomly choosing two time index and compute the average over 1000 realizations the dot product of the residuals at those two times. We can see that the residual correlation is a small number and we can safely assume that the noise generated is Markov.
+The above result is calculated from randomly choosing two time index and compute the average over 1000 realizations the dot product of the residuals at those two times. We can see that the residual correlation of 0.001537 is a small number and we can safely assume that the noise generated is Markov.
 
 ## Conclusion
 
