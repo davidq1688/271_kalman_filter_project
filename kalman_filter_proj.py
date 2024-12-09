@@ -4,6 +4,17 @@ from tqdm import tqdm
 
 # Statistics and Parameters:
 omega = 0.2  # angular frequency for the true acceleration profile
+def accel_true(time):
+    return 10*np.sin(omega*time)
+
+def true_state_propagate(curr_time, current_state):
+    # current_state = current_state.reshape((-1,))
+    curr_pos = current_state[0,0]
+    curr_vel = current_state[1,0]
+    curr_a = accel_true(curr_time)
+    pos = curr_pos + curr_vel*dt_imu + curr_a*dt_imu**2/2
+    vel = curr_vel + curr_a*dt_imu
+    return np.array([[pos], [vel], [current_state[2,0]]])
 
 # IMU
 imu_fs = 200  # IMU sample rate (Hz)
@@ -71,7 +82,7 @@ def initialize():
     return delta_x0_true, delta_x0, M0
 
 # Simulate one realization, initialize with random true state and random estimated state
-# Output: delta_x_true_list (N_time x 3 ndarray)
+# Output: x_true_list (N_time x 3 ndarray)
 # Output: delta_x_est_list (N_time x 3 ndarray)
 # Output: P_list (list of N_time 3x3 P matrix)
 # Output: state_error_list (N_time x 3 ndarray): delta_x_true_list - delta_x_est_list
@@ -95,6 +106,9 @@ def simulate_one_realization(time_list, gps_interval=40):
     delta_x_pred = delta_x0_est
 
     for k in range(len(time_list)):
+        # Propagate True state for t_k+1
+        x_true_list.append(true_state_propagate(time_list[k], x_true_list[k]))
+
         # Aposteriori Estimation at t_k
         if k % gps_interval == 0:
             # measurement obtained
@@ -127,7 +141,8 @@ def simulate_one_realization(time_list, gps_interval=40):
     delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
     state_error_list = delta_x_true_list - delta_x_est_list
     residual_list = np.array(residual_list).reshape((-1, 2))
-    return delta_x_true_list, delta_x_est_list, P_list, state_error_list, residual_list
+    x_true_list = np.array(x_true_list[0:-1]).reshape((-1, 3))
+    return x_true_list, delta_x_est_list, P_list, state_error_list, residual_list
 
 # Simulate N realizations and Analyze ensamble data
 # Output: P_avg_list: [N_time] x np.array(3x3). list of P_ave at each time.
@@ -141,12 +156,13 @@ def simulate_N_realizations(t_list, N_realization):
     error_p_all_realization = []  # shape: N_realization x N_time
     error_v_all_realization = []
     error_b_all_realization = []
-    delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
+    x_true_all_realization = []  # shape: N_realization x np.array(N_time x 3)
+    # delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
     residual_all_realization = []  # shape: N_realization x np.array(N_time_gps x 2)
 
     for i in tqdm(range(N_realization), desc='Simulating Realizations'):
         # simulate one realization
-        delta_x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
+        x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
 
         # save results
         error_p = np.array(error_l[:, 0]).reshape((-1,))
@@ -159,7 +175,8 @@ def simulate_N_realizations(t_list, N_realization):
 
         P_list_all_realization.append(P_list)
         e_l_all_realization.append(error_l)
-        delta_x_est_all_realization.append(delta_x_est_list)
+        x_true_all_realization.append(x_true_list)
+        # delta_x_est_all_realization.append(delta_x_est_list)
         residual_all_realization.append(r_l)
 
     error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
@@ -174,20 +191,23 @@ def simulate_N_realizations(t_list, N_realization):
         error_l_t = [e_l[i, :].reshape((-1,)) for e_l in e_l_all_realization]
         error_l_t = np.array(error_l_t).T  # shape: 3xN_realization
         temp = error_l_t - e_avg_list[:, i].reshape((-1, 1))  # e_l(ti) - e_avg(ti) shape: 3xN_realization
-        delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
-        delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
+        # delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
+        # delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
+        x_true_t = [x_true[i, :].reshape((-1,)) for x_true in x_true_all_realization]
+        x_true_t = np.array(x_true_t).T  # shape: 3xN_realization
+        x_est_t = x_true_t + error_l_t
         P_t_list = []
         ortho_t_list = []
         for j in range(N_realization):
             P_t_list.append(np.outer(temp[:, j], temp[:, j]))
-            ortho_t_list.append(np.inner(temp[:, j], delta_x_est_t[:, j]))
+            ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
         P_avg_list.append(np.mean(P_t_list, axis=0))
         ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
     
     return P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization
 
 # visualization functions
-def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list):
+def plot_one_realization_result(t_list, state_error_list, P_list, P_avg_list=None):
     sigma_p_list = []
     sigma_v_list = []
     sigma_ba_list = []
@@ -199,7 +219,7 @@ def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_l
 
     plt.figure()
     plt.subplot(131)
-    plt.plot(t_list, delta_x_true_list[:, 0]-delta_x_est_list[:, 0], label='pos estimation error')
+    plt.plot(t_list, state_error_list[:, 0], label='pos estimation error')
     plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
     plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
     plt.xlabel('Time (s)')
@@ -210,18 +230,18 @@ def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_l
     plt.grid()
 
     plt.subplot(132)
-    plt.plot(t_list, delta_x_true_list[:, 1]-delta_x_est_list[:, 1], label='vel estimation error')
+    plt.plot(t_list, state_error_list[:, 1], label='vel estimation error')
     plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
     plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
     plt.xlabel('Time (s)')
     plt.ylabel('Velocity (m/s)')
-    plt.ylim([-0.1, 0.1])
+    plt.ylim([-0.05, 0.05])
     plt.legend()
     plt.title('Velocity Estimation Error')
     plt.grid()
 
     plt.subplot(133)
-    plt.plot(t_list, delta_x_true_list[:, 2]-delta_x_est_list[:, 2], label='bias estimation error')
+    plt.plot(t_list, state_error_list[:, 2], label='bias estimation error')
     plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
     plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
     plt.xlabel('Time (s)')
@@ -230,8 +250,9 @@ def plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_l
     plt.legend()
     plt.title('IMU bias Estimation Error')
     plt.grid()
-    # plt.show()
-    plot_P_error_one_realization(t_list, P_avg_list, P_list)
+    
+    if P_avg_list is not None:
+        plot_P_error_one_realization(t_list, P_avg_list, P_list)
 
 def plot_P_error_one_realization(t_list, P_avg_list, P_list):
     P_error_list = []
@@ -353,10 +374,10 @@ N_realization = 1000
 P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization = simulate_N_realizations(t_list, N_realization)
 
 # Test one realization and visualize KF performance
-delta_x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
+x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t_list)
 
 # Plotting Results
-plot_one_realization_result(t_list, delta_x_true_list, delta_x_est_list, P_list, P_avg_list)
+plot_one_realization_result(t_list, error_l, P_list, P_avg_list)
 plot_avg_estimation_error(t_list, e_avg_list)
 plot_orthogonality_for_state_est_and_est_error(t_list, ortho_e_and_e_est_list)
 print_residual_correlation(t_gps_list, residual_all_realization)
