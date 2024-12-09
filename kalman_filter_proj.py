@@ -43,20 +43,6 @@ def gps_meas_update(current_state_true, eta):
     z = current_state_true[0:2].reshape((-1,1)) + eta
     return z  # col vector [z_p, z_v]
 
-# Truth Model:
-# def true_state_continuous(t, delta_x0):
-#     t = np.array(t).reshape((-1,))
-#     delta_x0 = delta_x0.reshape((-1,))
-#     p0 = delta_x0[0] + p0_bar
-#     v0 = delta_x0[1] + v0_bar
-#     ba0 = delta_x0[2]
-
-#     a = 10*np.sin(omega*t)
-#     v = v0 + a/omega - a/omega*np.cos(omega*t)
-#     p = p0 + (v0 + a/omega)*t - a/(omega**2)*np.sin(omega*t)
-#     ba_list = ba0 * np.ones(np.shape(p))
-#     return np.array([[p], [v], [ba_list]])
-
 # Discrete Linear System: state x = [delta_p_e, delta_v_e, ba], noise w = [w]
 # x_k+1 = PHI*x_k + GAMMA*w
 # delta_p_e = p_e - p_c, delta_v_e = v_e - v_c
@@ -77,16 +63,12 @@ def initialize():
     delta_p0_true = np.sqrt(p0_var)*np.random.randn()
     delta_x0_true = np.array([delta_p0_true, delta_v0_true, ba_true]).reshape((-1,1))
 
-    # ba0 = ba_bar + np.sqrt(ba_var)*np.random.randn()
-    # delta_v0 = np.sqrt(v0_var)*np.random.randn()
-    # delta_p0 = np.sqrt(p0_var)*np.random.randn()
     delta_x0 = np.array([0, 0, 0]).reshape((-1,1))
 
-    P0 = np.array([[p0_var, 0,0],
+    M0 = np.array([[p0_var, 0,0],
                    [0, v0_var, 0],
                    [0, 0, ba_var]])
-    return delta_x0_true, delta_x0, P0
-
+    return delta_x0_true, delta_x0, M0
 
 # Simulate one realization, initialize with random true state and random estimated state
 # Output: delta_x_true_list (N_time x 3 ndarray)
@@ -96,7 +78,7 @@ def initialize():
 # Output: residual_list (N_time_gps x 2 ndarray): delta_z - H@delta_x_pred
 def simulate_one_realization(time_list, gps_interval=40):
     # initialize system true state, estimate state, and state covariance
-    delta_x0_true, delta_x0_est, P0 = initialize()
+    delta_x0_true, delta_x0_est, M0 = initialize()
     
     # state [dp_e = pe - pc, dv_e = ve - vc, ba]
     delta_x_true_list = []
@@ -106,26 +88,18 @@ def simulate_one_realization(time_list, gps_interval=40):
     residual_list = []  # residual = delta_z - H@delta_x_pred
 
     delta_x_true_list.append(delta_x0_true)
-    delta_x_est_list.append(delta_x0_est)
-    P_list.append(P0)
+    # delta_x_est_list.append(delta_x0_est)
+    # P_list.append(P0)
     x_true_list.append(delta_x0_true + np.array([[p0_bar],[v0_bar],[0]]))
+    M = M0
+    delta_x_pred = delta_x0_est
 
-    for k in range(len(time_list)-1):
-        # imu noise
-        w = generate_imu_noise_w()
-        # true state propagate
-        delta_x_true = PHI@delta_x_true_list[k] + GAMMA*w
-        delta_x_true_list.append(delta_x_true)
-
-        # Apriori prediction
-        delta_x_pred = PHI@delta_x_est_list[k]
-        M = PHI@P_list[k]@PHI.T + GAMMA@GAMMA.T*W
-
-        # Aposteriori Estimation
+    for k in range(len(time_list)):
+        # Aposteriori Estimation at t_k
         if k % gps_interval == 0:
             # measurement obtained
             eta = generate_gps_noise_eta()
-            delta_z = gps_meas_update(delta_x_true, eta)
+            delta_z = gps_meas_update(delta_x_true_list[k], eta)
             # KF meas update: x_est = x_pred + K*(z - H*x_pred), K = P*H.T*inv(V)
             P = M - M@H.T@np.linalg.inv(H@M@H.T + V_gps)@H@M
             r = delta_z - H@delta_x_pred
@@ -138,13 +112,28 @@ def simulate_one_realization(time_list, gps_interval=40):
         
         P_list.append(P)
         delta_x_est_list.append(delta_x_est)
+        
+        # imu noise
+        w = generate_imu_noise_w()
+        # true state propagate t_k+1
+        delta_x_true = PHI@delta_x_true_list[k] + GAMMA*w
+        delta_x_true_list.append(delta_x_true)
 
-    delta_x_true_list = np.array(delta_x_true_list).reshape((-1, 3))
+        # Apriori prediction for t_k+1
+        delta_x_pred = PHI@delta_x_est_list[k]
+        M = PHI@P_list[k]@PHI.T + GAMMA@GAMMA.T*W
+
+    delta_x_true_list = np.array(delta_x_true_list[0:-1]).reshape((-1, 3))
     delta_x_est_list = np.array(delta_x_est_list).reshape((-1, 3))
     state_error_list = delta_x_true_list - delta_x_est_list
     residual_list = np.array(residual_list).reshape((-1, 2))
     return delta_x_true_list, delta_x_est_list, P_list, state_error_list, residual_list
 
+# Simulate N realizations and Analyze ensamble data
+# Output: P_avg_list: [N_time] x np.array(3x3). list of P_ave at each time.
+# Output: e_avg_list: (3 x N_time)ndarray. avg of e_l.
+# Output: ortho_e_and_e_est_list: list [N_time]. avg of np.dot(e_l - e_avg, x_est).
+# Output: residual_all_realization: list [N_time]. list of delta_z - H@delta_x_pred.
 def simulate_N_realizations(t_list, N_realization):
     # Ensamble of Realizations
     P_list_all_realization = []  # N_realization x N_time x np.array(3 x 3)
@@ -176,7 +165,7 @@ def simulate_N_realizations(t_list, N_realization):
     error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
     error_v_avg = np.mean(error_v_all_realization, axis=0)  # avg of vel_error[time]
     error_b_avg = np.mean(error_b_all_realization, axis=0)  # avg of bias_error[time]
-    e_avg_list = np.array([error_p_avg, error_v_avg, error_b_avg])  # shape: 3xlen(t_list)
+    e_avg_list = np.array([error_p_avg, error_v_avg, error_b_avg])  # shape: 3xN_time
 
     # Compute P_ave, check for x_est and e_est orthogonality
     P_avg_list = []  # N_time x np.array(3x3)
@@ -260,39 +249,39 @@ def plot_P_error_one_realization(t_list, P_avg_list, P_list):
     plt.figure()
     plt.subplot(331)  # P11 error
     plt.plot(t_list, P11_error)
-    plt.title('P_11')
+    plt.title('P_11 Error')
     plt.grid()
     plt.subplot(332)
     plt.plot(t_list, P12_error)
-    plt.title('P_12')
+    plt.title('P_12 Error')
     plt.grid()
     plt.subplot(333)
     plt.plot(t_list, P13_error)
-    plt.title('P_13')
+    plt.title('P_13 Error')
     plt.grid()
     plt.subplot(334)
     plt.plot(t_list, P21_error)
-    plt.title('P_21')
+    plt.title('P_21 Error')
     plt.grid()
     plt.subplot(335)
     plt.plot(t_list, P22_error)
-    plt.title('P_22')
+    plt.title('P_22 Error')
     plt.grid()
     plt.subplot(336)
     plt.plot(t_list, P23_error)
-    plt.title('P_23')
+    plt.title('P_23 Error')
     plt.grid()
     plt.subplot(337)
     plt.plot(t_list, P31_error)
-    plt.title('P_31')
+    plt.title('P_31 Error')
     plt.grid()
     plt.subplot(338)
     plt.plot(t_list, P32_error)
-    plt.title('P_32')
+    plt.title('P_32 Error')
     plt.grid()
     plt.subplot(339)
     plt.plot(t_list, P33_error)
-    plt.title('P_33')
+    plt.title('P_33 Error')
     plt.grid()
     # plt.show()
 
@@ -307,6 +296,7 @@ def plot_avg_estimation_error(t_list, error_avg_list):
         sigma_ba_list.append(np.sqrt(P_i[2,2]))
     plt.figure()
     plt.plot(t_list, error_avg_list[0, :], label='Avg pos est error')
+    plt.plot(t_list, np.zeros((len(t_list), )), 'r')
     # plt.plot(t_list, sigma_p_list, 'r', label='1-sigma bound')
     # plt.plot(t_list, -1*np.array(sigma_p_list), 'r')
     plt.xlabel('Time (s)')
@@ -315,6 +305,7 @@ def plot_avg_estimation_error(t_list, error_avg_list):
 
     plt.figure()
     plt.plot(t_list, error_avg_list[1, :], label='avg vel est error')
+    plt.plot(t_list, np.zeros((len(t_list), )), 'r')
     # plt.plot(t_list, sigma_v_list, 'r', label='1-sigma bound')
     # plt.plot(t_list, -1*np.array(sigma_v_list), 'r')
     plt.xlabel('Time (s)')
@@ -323,6 +314,7 @@ def plot_avg_estimation_error(t_list, error_avg_list):
 
     plt.figure()
     plt.plot(t_list, error_avg_list[2, :], label='avg bias est error')
+    plt.plot(t_list, np.zeros((len(t_list), )), 'r')
     # plt.plot(t_list, sigma_ba_list, 'r', label='1-sigma bound')
     # plt.plot(t_list, -1*np.array(sigma_ba_list), 'r')
     plt.xlabel('Time (s)')
@@ -332,6 +324,7 @@ def plot_avg_estimation_error(t_list, error_avg_list):
 def plot_orthogonality_for_state_est_and_est_error(t_list, ortho_list):
     plt.figure()
     plt.plot(t_list, ortho_list)
+    plt.plot(t_list, np.zeros((len(t_list), )), 'r')
     plt.xlabel('Time (s)')
     plt.title('Check Orthogonality for State Estimate and Estimation Error')
     plt.grid()
