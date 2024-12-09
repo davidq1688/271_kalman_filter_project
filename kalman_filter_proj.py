@@ -383,3 +383,6 @@ plot_orthogonality_for_state_est_and_est_error(t_list, ortho_e_and_e_est_list)
 print_residual_correlation(t_gps_list, residual_all_realization)
 
 plt.show()
+
+# Convert markdown to pdf:
+# pandoc 'Project Report.md' -s -o project_report.pdf
