@@ -123,8 +123,8 @@ From the System above that is independent from the acceleration profile, we can 
 - Initialize true states based on apirori statistics of the states. Initial state prediction will be the expected values of the states from the apriori statistics. Initial apriori error variance will be the state variances from the apriori statistics.
 
 - Begin loop:
-   - Aposteriori estimation for $t_k$
-      - If measurement obtained
+   - Aposteriori estimation for $t_k$:
+      - If measurement obtained:
       $$
       P_k = M_k - M_kH^T(HM_kH^T + V_{gps})^{-1}HM_k\\
       K_k = P_kH^TV^{-1}\\
@@ -144,42 +144,87 @@ From the System above that is independent from the acceleration profile, we can 
    M_k = \Phi P_k\Phi ^T + \Gamma W\Gamma^T
    $$
 
+   - For simulation analysis, propagate true state for $t_{k+1}$:
+   $$
+   \delta x_{k+1} = \Phi \delta x_k + \Gamma w_k
+   $$
+
 ## Results
+- Note: all plots have units in SI. For example, position will have units of m, position variance will have units of m^2, velocity will have units of m/s, velocity variance will have (m/s)^2, covariance of position and velocity will have (m^2/s), etc.
 
 ### One Realization Results
+Shown below is the state estimation error and the error variance matrix error for one realization. We want our estimation error to be small to show that the kalman filter gives accurate estimation of the states.
+
+State estimation error is calculated as
+$$
+e^l(t_k) = \delta x(t_k) - \delta x_{estimate}(t_k)
+$$
+
 ![est error plot](one_realiz_est_error_plot.png "Estimation Error Plot") |
 :--:|
-*Estimation Error Plot for 1 Realization* |
+*State Estimation Error Plot for 1 Realization* |
+
+P error is calculated as
+$$
+P_{error}(t_k) = P_{ave}(t_k) - P(t_k)
+$$
+
+where $P_{ave}$ is calculated from averaging over the outer product of the difference between $e^l$ and $E[e^l]$ over the ensamble of realizations.
+$$
+e^{ave}(t_k) = E[e^l(t_k)] = mean(e^l(t_k))\ (\sim 0)\\
+\tilde e_k = e^l_k - e^{ave}_k\ (\sim x - E[x] = \tilde x)\\
+P_{ave}(t_k) = E[\tilde e_k^\ \tilde e_k^T] = mean(\tilde e_k\ \tilde e_k^T)
+$$
 
 ![p error plot](one_realiz_P_error_plot.png "P Error Plot") |
 :--:|
 *P Error Plot for 1 Realization* |
 
-### Key Findings
+For this realization, the kalman filter is able to keep the states within the 1-sigma bound most of the time, showing its ability to converge the estimated states to the true states. The error covariance matrix is also really close to the true error covariance matrix calculated from averaging over 1000 realizations, showing that the kalman filter is programmed correctly.
 
-1. **Position and Velocity Estimation Errors:**
-   The errors for position and velocity consistently converged to zero, as shown in the figures. The 1-sigma bounds derived from the covariance matrix accurately captured the estimation uncertainty.
+### Ensamble Realizations Estimation Error Results
+We plot the average state estimation error $e^{ave}$ over 1000 realizations. They should be very close to 0 to show that there's no systematic error in the estimation process.
 
-2. **Bias Estimation:**
-   The filter successfully tracked the IMU bias over time, demonstrating its adaptability.
+![pos error plot](avg_pos_error_1000.png "Average Pos Error Plot") |
+:--:|
+*Average Position Estimation Error Plot for 1000 Realization* |
 
-3. **Residual Analysis:**
-   Residuals were uncorrelated, validating the filter’s assumptions.
+![vel error plot](avg_vel_error_1000.png "Average Vel Error Plot") |
+:--:|
+*Average Velocity Estimation Error Plot for 1000 Realization* |
 
-4. **Orthogonality:**
-   The orthogonality between estimation errors and the state estimates was confirmed, highlighting the filter’s optimality.
+![bias error plot](avg_bias_error_1000.png "Average Bias Error Plot") |
+:--:|
+*Average IMU Bias Estimation Error Plot for 1000 Realization* |
 
-## Analysis
+The above plots show that the average estimation error is reasonably small and close to 0. The average position error are relatively larger but could be explained by the large position error variance predicted by the kalman filter.
 
-The Kalman Filter’s performance was assessed using several metrics:
+### Orthogonality Check
+We want to check that on average over the ensamble of realizations, $\tilde e$ and $\hat x\ (E[x])$ are orthogonal to each other. The orthogonality between estimation error and state estimate will show how optimal the filter is. We take the dot product of the 2 vectors and expect them to be close to 0 if orthogonal.
+$$
+E[\tilde e_k^T\ \hat x_k] \sim 0\ \forall k\\
+mean(\tilde e_k^T\ \hat x_k) \sim 0\ \forall k
+$$
 
-- **Error Dynamics:** The error in position and velocity decreased exponentially, aligning with theoretical expectations.
-- **Covariance Consistency:** The estimated covariance bounds encompassed the true errors, indicating appropriate tuning of process and measurement noise parameters.
-- **Residual Statistics:** Residuals followed Gaussian distributions with zero mean, reinforcing the validity of the noise assumptions.
+![ortho plot](orthogonality_1000.png "Orthogonality Plot") |
+:--:|
+*Check $\tilde e$ and $\hat x$ Orthogonality. Average over 1000 Realizations* |
 
-Challenges observed included sensitivity to initial conditions and noise statistics. Robustness to parameter misestimation remains an area for further investigation.
+From the plot above, we can see that the average values are relatively small and close to 0, indicating some optimality in the filter performance.
+
+### Check Residual Independence
+We want to check that the residuals at different time are independent from each other because otherwise the process is not Markov. To show independence, the average of the dot product of two randomly picked residuals at different times should be close to 0.
+$$
+r^l_k = \delta z_k - H\delta x_{predicted, k}\\
+mean(r_i^{lT}\ r_j^l) \sim 0\ \forall i \ne j
+$$
+
+![residual correlation](residual_correlation_1000.png "Residual Correlation") |
+:--:|
+*Average Residual Correlation for 1000 Realization* |
+
+The above result is calculated from randomly choosing two time index and compute the average over 1000 realizations the dot product of the residuals at those two times. We can see that the residual correlation is a small number and we can safely assume that the noise generated is Markov.
 
 ## Conclusion
 
-The implemented Kalman Filter effectively estimated position, velocity, and bias for a single-axis motion system. Simulation results verified the filter’s accuracy and theoretical consistency. Future work may extend this implementation to multi-dimensional motion and incorporate adaptive noise modeling for enhanced robustness.
-
+The implemented Kalman Filter effectively estimated position, velocity, and bias for a single-axis motion system. Simulation results verified the filter’s accuracy and theoretical consistency. Future work may extend this implementation to multi-dimensional motion and possibly with other sensors for localization of the vehicle.
