@@ -202,15 +202,15 @@ def simulate_N_realizations(t_list, N_realization):
 
         # Compute and append orthogonality check only if measurement is obtained
         if i % 40 == 0:
-            x_true_t = [x_true[i, :].reshape((-1,)) for x_true in x_true_all_realization]
-            x_true_t = np.array(x_true_t).T  # shape: 3xN_realization
-            x_est_t = x_true_t - error_l_t
-            # delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
-            # delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
+            # x_true_t = [x_true[i, :].reshape((-1,)) for x_true in x_true_all_realization]
+            # x_true_t = np.array(x_true_t).T  # shape: 3xN_realization
+            # x_est_t = x_true_t - error_l_t
+            delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
+            delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
             ortho_t_list = []
             for j in range(N_realization):
-                ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
-                # ortho_t_list.append(np.inner(error_l_t[:, j], delta_x_est_t[:, j]))
+                # ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
+                ortho_t_list.append(np.inner(error_l_t[:, j], delta_x_est_t[:, j]))
             ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
     
     return P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization
@@ -379,7 +379,7 @@ def print_residual_correlation(t_gps_list, r_l_all_realization):
 t_list = np.arange(0, 30+dt_imu, dt_imu)
 t_gps_list = np.arange(0, 30+dt_gps, dt_gps)
 
-N_realization = 100
+N_realization = 1000
 P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization = simulate_N_realizations(t_list, N_realization)
 
 # Test one realization and visualize KF performance
