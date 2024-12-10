@@ -147,7 +147,7 @@ def simulate_one_realization(time_list, gps_interval=40):
 # Simulate N realizations and Analyze ensamble data
 # Output: P_avg_list: [N_time] x np.array(3x3). list of P_ave at each time.
 # Output: e_avg_list: (3 x N_time)ndarray. avg of e_l.
-# Output: ortho_e_and_e_est_list: list [N_time]. avg of np.dot(e_l - e_avg, x_est).
+# Output: ortho_e_and_e_est_list: list [N_time_gps]. avg of np.dot(e_l - e_avg, x_est).
 # Output: residual_all_realization: list [N_time]. list of delta_z - H@delta_x_pred.
 def simulate_N_realizations(t_list, N_realization):
     # Ensamble of Realizations
@@ -157,7 +157,7 @@ def simulate_N_realizations(t_list, N_realization):
     error_v_all_realization = []
     error_b_all_realization = []
     x_true_all_realization = []  # shape: N_realization x np.array(N_time x 3)
-    # delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
+    delta_x_est_all_realization = []  # shape: N_realization x np.array(N_time x 3)
     residual_all_realization = []  # shape: N_realization x np.array(N_time_gps x 2)
 
     for i in tqdm(range(N_realization), desc='Simulating Realizations'):
@@ -176,7 +176,7 @@ def simulate_N_realizations(t_list, N_realization):
         P_list_all_realization.append(P_list)
         e_l_all_realization.append(error_l)
         x_true_all_realization.append(x_true_list)
-        # delta_x_est_all_realization.append(delta_x_est_list)
+        delta_x_est_all_realization.append(delta_x_est_list)
         residual_all_realization.append(r_l)
 
     error_p_avg = np.mean(error_p_all_realization, axis=0)  # avg of pos_error[time]
@@ -193,16 +193,25 @@ def simulate_N_realizations(t_list, N_realization):
         temp = error_l_t - e_avg_list[:, i].reshape((-1, 1))  # e_l(ti) - e_avg(ti) shape: 3xN_realization
         # delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
         # delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
-        x_true_t = [x_true[i, :].reshape((-1,)) for x_true in x_true_all_realization]
-        x_true_t = np.array(x_true_t).T  # shape: 3xN_realization
-        x_est_t = x_true_t - error_l_t
+        # Compute and append P_avg
         P_t_list = []
-        ortho_t_list = []
         for j in range(N_realization):
             P_t_list.append(np.outer(temp[:, j], temp[:, j]))
-            ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
+            # ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
         P_avg_list.append(np.mean(P_t_list, axis=0))
-        ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
+
+        # Compute and append orthogonality check only if measurement is obtained
+        if i % 40 == 0:
+            x_true_t = [x_true[i, :].reshape((-1,)) for x_true in x_true_all_realization]
+            x_true_t = np.array(x_true_t).T  # shape: 3xN_realization
+            x_est_t = x_true_t - error_l_t
+            # delta_x_est_t = [dx_est[i, :].reshape((-1,)) for dx_est in delta_x_est_all_realization]
+            # delta_x_est_t = np.array(delta_x_est_t).T  # shape: 3xN_realization
+            ortho_t_list = []
+            for j in range(N_realization):
+                ortho_t_list.append(np.inner(temp[:, j], x_est_t[:, j]))
+                # ortho_t_list.append(np.inner(error_l_t[:, j], delta_x_est_t[:, j]))
+            ortho_e_and_e_est_list.append(np.mean(ortho_t_list, axis=0))
     
     return P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization
 
@@ -342,10 +351,10 @@ def plot_avg_estimation_error(t_list, error_avg_list):
     plt.title('Average Bias Error')
     plt.grid()
 
-def plot_orthogonality_for_state_est_and_est_error(t_list, ortho_list):
+def plot_orthogonality_for_state_est_and_est_error(t_gps_list, ortho_list):
     plt.figure()
-    plt.plot(t_list, ortho_list)
-    plt.plot(t_list, np.zeros((len(t_list), )), 'r')
+    plt.plot(t_gps_list, ortho_list)
+    plt.plot(t_gps_list, np.zeros((len(t_gps_list), )), 'r')
     plt.xlabel('Time (s)')
     plt.title('Check Orthogonality for State Estimate and Estimation Error')
     plt.grid()
@@ -370,7 +379,7 @@ def print_residual_correlation(t_gps_list, r_l_all_realization):
 t_list = np.arange(0, 30+dt_imu, dt_imu)
 t_gps_list = np.arange(0, 30+dt_gps, dt_gps)
 
-N_realization = 1000
+N_realization = 100
 P_avg_list, e_avg_list, ortho_e_and_e_est_list, residual_all_realization = simulate_N_realizations(t_list, N_realization)
 
 # Test one realization and visualize KF performance
@@ -379,7 +388,7 @@ x_true_list, delta_x_est_list, P_list, error_l, r_l = simulate_one_realization(t
 # Plotting Results
 plot_one_realization_result(t_list, error_l, P_list, P_avg_list)
 plot_avg_estimation_error(t_list, e_avg_list)
-plot_orthogonality_for_state_est_and_est_error(t_list, ortho_e_and_e_est_list)
+plot_orthogonality_for_state_est_and_est_error(t_gps_list, ortho_e_and_e_est_list)
 print_residual_correlation(t_gps_list, residual_all_realization)
 
 plt.show()
