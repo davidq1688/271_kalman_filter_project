@@ -196,6 +196,10 @@ $$
 :--:|
 *State Estimation Error Plot for 1 Realization* |
 
+![bias error zoomed plot](bias_zoomed_in.png "Bias Error Zoomed Plot") |
+:--:|
+*State Estimation Error Plot for 1 Realization, Zoomed Bias Error* |
+
 P error is calculated as
 $$
 P_{error}(t_k) = P_{ave}(t_k) - P(t_k)
