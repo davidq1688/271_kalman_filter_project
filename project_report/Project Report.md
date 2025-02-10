@@ -30,23 +30,23 @@ $$
 
 where $\eta _p$ and $\eta _v$ are the GPS position and velocity measurement noise, modeled as independent additive white Gaussian noise
 
-$$
-\left[\begin{array}{ccc}
-\eta _p\\
-\eta _v
-\end{array}\right]
-\sim N(
-\left[\begin{array}{ccc}
-0\\
-0 
-\end{array}\right], 
-V_{gps} = 
-\left[\begin{array}{ccc}
-1m^2 & 0\\
-0 & (0.04m/s)^2
-\end{array}\right]
-)
-$$
+```math
+   \left[\begin{array}{ccc}
+   \eta _p\\
+   \eta _v
+   \end{array}\right]
+   \sim N(
+   \left[\begin{array}{ccc}
+   0\\
+   0 
+   \end{array}\right], 
+   V_{gps} = 
+   \left[\begin{array}{ccc}
+   1m^2 & 0\\
+   0 & (0.04m/s)^2
+   \end{array}\right]
+   )
+```
 
 The initial position and velocity has apriori statistics $p_0 \sim N(0m, (10m)^2)$, $v_0 \sim N(100 m/s, (1m/s)^2)$.
 
@@ -147,39 +147,48 @@ From the System above that is independent from the acceleration profile, we can 
 - Begin loop:
    - Aposteriori estimation for $t_k$:
       - If measurement obtained:
-      $$
-      P_k = M_k - M_kH^T(HM_kH^T + V_{gps})^{-1}HM_k
-      $$
-      $$
-      K_k = P_kH^TV^{-1}
-      $$
-      $$
-      r = \delta z - H\delta x_{predicted}\ (residual)
-      $$
-      $$
-      \delta x_{estimate} = \delta x_{predicted} + K_k\ r
-      $$
+
+         $`
+         P_k = M_k - M_kH^T(HM_kH^T + V_{gps})^{-1}HM_k
+         `$
+
+         $`
+         K_k = P_kH^TV^{-1}
+         `$
+   
+         $`
+         r = \delta z - H\delta x_{predicted}\ (residual)
+         `$
+   
+         $`
+         \delta x_{estimate} = \delta x_{predicted} + K_k\ r
+         `$
 
       - If measurement not obtained:
-      $$
-      P_k = M_k
-      $$
-      $$
-      \delta x_{estimate} = \delta x_{predicted}
-      $$
+
+         $`
+         P_k = M_k
+         `$
+   
+         $`
+         \delta x_{estimate} = \delta x_{predicted}
+         `$
 
    - Apriori prediction for $t_{k+1}$:
-   $$
-   \delta x_{predicted} = \Phi \delta x_{estimate}
-   $$
-   $$
-   M_k = \Phi P_k\Phi ^T + \Gamma W\Gamma^T
-   $$
+
+      $`
+      \delta x_{predicted} = \Phi \delta x_{estimate}
+      `$
+   
+      $`
+      M_k = \Phi P_k\Phi ^T + \Gamma W\Gamma^T
+      `$
 
    - For simulation analysis, propagate true state for $t_{k+1}$:
-   $$
-   \delta x_{k+1} = \Phi \delta x_k + \Gamma w_k
-   $$
+
+      $`
+      \delta x_{k+1} = \Phi \delta x_k + \Gamma w_k
+      `$
 
 ## Results
 - Note: all plots have units in SI. For example, position will have units of m, position variance will have units of m^2, velocity will have units of m/s, velocity variance will have (m/s)^2, covariance of position and velocity will have (m^2/s), etc.
@@ -188,9 +197,9 @@ From the System above that is independent from the acceleration profile, we can 
 Shown below is the state estimation error and the error variance matrix error for one realization. We want our estimation error to be small to show that the kalman filter gives accurate estimation of the states.
 
 State estimation error is calculated as
-$$
+$`
 e^l(t_k) = \delta x(t_k) - \delta x_{estimate}(t_k)
-$$
+`$
 
 ![est error plot](one_realiz_est_error_plot.png "Estimation Error Plot") |
 :--:|
@@ -201,20 +210,22 @@ $$
 *State Estimation Error Plot for 1 Realization, Zoomed Bias Error* |
 
 P error is calculated as
-$$
+$`
 P_{error}(t_k) = P_{ave}(t_k) - P(t_k)
-$$
+`$
 
 where $P_{ave}$ is calculated from averaging over the outer product of the difference between $e^l$ and $E[e^l]$ over the ensamble of realizations.
-$$
+$`
 e^{ave}(t_k) = E[e^l(t_k)] = mean(e^l(t_k))\ (\sim 0)
-$$
-$$
+`$
+
+$`
 \tilde e_k = e^l_k - e^{ave}_k\ (\sim x - E[x] = \tilde x)
-$$
-$$
+`$
+
+$`
 P_{ave}(t_k) = E[ \tilde e_k\ e_k^T] = mean(\tilde e_k\ \tilde e_k^T)
-$$
+`$
 
 ![p error plot](one_realiz_P_error_plot.png "P Error Plot") |
 :--:|
@@ -241,27 +252,31 @@ The above plots show that the average estimation error is reasonably small and c
 
 ### Orthogonality Check
 We want to check that on average over the ensamble of realizations, $\tilde e$ and $\hat x\ (E[x])$ are orthogonal to each other. The orthogonality between estimation error and state estimate will show how optimal the filter is. We take the dot product of the 2 vectors and expect them to be close to 0 if orthogonal.
-$$
+
+$`
 E[\tilde e_k^T\ \hat x_k] \sim 0\ \forall k
-$$
-$$
+`$
+
+$`
 mean(\tilde e_k^T\ \hat x_k) \sim 0\ \forall k
-$$
+`$
 
 ![ortho plot](orthogonality_1000.png "Orthogonality Plot") |
 :--:|
-*Check $\tilde e$ and $\hat x$ Orthogonality. Average over 1000 Realizations* |
+*Check $`\tilde e`$ and $`\hat x`$ Orthogonality. Average over 1000 Realizations* |
 
 From the plot above, we can see that the average values are relatively small and close to 0, indicating some optimality in the filter performance.
 
 ### Check Residual Independence
 We want to check that the residuals at different time are independent from each other because otherwise the process is not Markov. To show independence, the average of the dot product of two randomly picked residuals at different times should be close to 0.
-$$
+
+$`
 r^l_k = \delta z_k - H\delta x_{predicted, k}
-$$
-$$
+`$
+
+$`
 mean(r_i^{lT}\ r_j^l) \sim 0\ \forall i \ne j
-$$
+`$
 
 ![residual correlation](residual_correlation_1000.png "Residual Correlation") |
 :--:|
